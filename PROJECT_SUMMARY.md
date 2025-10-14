@@ -374,5 +374,5 @@ The System Monitoring Dashboard is fully functional and ready for:
 
 **Built with ❤️ using modern web technologies**
 
-*Last Updated: 2024*
+*Last Updated: 14 October 2025*
 
