@@ -387,17 +387,16 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Security: WebSocket authentication middleware (placeholder for future implementation)
+// Security: WebSocket authentication middleware
+// Note: Authentication implementation is required for production use
+// In production, verify JWT token from handshake auth before allowing connections
 const authenticateSocket = (socket: any, next: any) => {
-  // TODO: Implement proper authentication
-  // For now, allow all connections in development
-  // In production, verify JWT token from handshake auth
-  if (process.env.NODE_ENV === 'production') {
-    // const token = socket.handshake.auth?.token;
-    // if (!token || !verifyToken(token)) {
-    //   return next(new Error('Authentication error'));
-    // }
-  }
+  // Authentication is currently disabled for development/demo purposes
+  // For production deployment, implement JWT token verification:
+  // const token = socket.handshake.auth?.token;
+  // if (!token || !verifyToken(token)) {
+  //   return next(new Error('Authentication error'));
+  // }
   next();
 };
 
