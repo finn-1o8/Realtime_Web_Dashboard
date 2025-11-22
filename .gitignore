@@ -28,3 +28,8 @@ dist-ssr
 .env.local
 .env.production
 
+# Internal documentation (not for public)
+SECURITY_AUDIT_REPORT.md
+*_AUDIT*.md
+*_INTERNAL*.md
+
