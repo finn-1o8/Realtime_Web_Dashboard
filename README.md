@@ -1,302 +1,82 @@
 # System Monitoring Dashboard
 
-A professional web-based dashboard application for real-time monitoring and control of camera/LiDAR systems. Built with React 18, TypeScript, and modern web technologies.
+A React and TypeScript front-end for monitoring and controlling camera and LiDAR systems, running against a mock Socket.IO backend. It is a UI prototype: the server fabricates systems, cameras, metrics and recording sessions so the interface can be developed and demonstrated without hardware, and it has no authentication.
 
-## Features
+![CI](https://github.com/finn-1o8/Realtime_Web_Dashboard/actions/workflows/ci.yml/badge.svg)
 
-### Core Capabilities
-- **Live Video Feeds**: Display multiple camera feeds simultaneously with configurable grid layouts (1, 4, 9, or 16 views)
-- **Camera Controls**: Real-time adjustment of exposure, gain, white balance, focus, and zoom
-- **LiDAR Visualization**: 3D point cloud rendering with interactive controls
-- **System Monitoring**: Real-time status monitoring for cameras, LiDAR, network, and system health
-- **Data Capture**: Start, stop, and manage recording sessions with configurable parameters
-- **Alert System**: Real-time alerts and notifications for system events
+## What is implemented
 
-### Technical Highlights
-- **Low Latency**: WebSocket-based real-time communication
-- **Responsive Design**: Works on desktop, tablet, and mobile devices
-- **Dark Theme**: Optimized for extended monitoring sessions
-- **Modular Architecture**: Clean separation of concerns with Redux state management
-- **Type Safety**: Full TypeScript implementation
+- Video feed grid with a 1, 4, 9 or 16 tile layout selector and fullscreen per camera (sample MP4 streams from the mock).
+- Camera control panel: exposure, gain and white balance with sliders and direct input, applied through the store and the mock API.
+- LiDAR view: a canvas-rendered point cloud with zoom, rotate, reset and depth colouring. The scene is simulated because the mock produces no LiDAR frames; a real feed would replace the generator in `LidarView.tsx`.
+- System status panel: CPU, memory, disk, temperature and network metrics polled every five seconds, plus system and camera state pushed by the server every two seconds over Socket.IO.
+- Recording controls: start, pause and stop with quality and codec selection, plus storage usage.
+- Alert panel with severity levels, acknowledge and dismiss.
 
-## Technology Stack
+Not implemented: authentication, real video or LiDAR ingestion, persistence, undo/redo, historical charts.
 
-### Frontend
-- **Framework**: React 18+ with TypeScript
-- **State Management**: Redux Toolkit
-- **UI Framework**: Material-UI (MUI)
-- **Real-time Communication**: Socket.io-client
-- **3D Visualization**: Three.js / React-Three-Fiber (ready for integration)
-- **Charts**: Recharts
-- **Build Tool**: Vite
+## Stack
 
-### Backend (Mock Server)
-- **Runtime**: Node.js with Express
-- **WebSocket**: Socket.io
-- **Language**: TypeScript
+React 18, TypeScript (strict), Redux Toolkit, Material UI, Socket.IO client, Axios, Vite. The mock server is Express plus Socket.IO in TypeScript, run with `tsx`.
 
-## Getting Started
+## Getting started
 
-### Prerequisites
-- Node.js 18+ and npm
-- Modern web browser (Chrome, Firefox, Safari, Edge)
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   cd Web_Dashboard
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Start the development server**
-   ```bash
-   npm run dev:all
-   ```
-   
-   This will start both the frontend (port 3000) and mock backend server (port 3001).
-
-   Or run them separately:
-   ```bash
-   # Frontend only
-   npm run dev
-   
-   # Backend only
-   npm run dev:server
-   ```
-
-4. **Open your browser**
-   Navigate to `http://localhost:3000`
-
-### Building for Production
+Requires Node.js 20 or newer.
 
 ```bash
+git clone https://github.com/finn-1o8/Realtime_Web_Dashboard.git
+cd Realtime_Web_Dashboard
+npm ci
+npm run dev:all
+```
+
+Frontend on http://localhost:3000, mock API and Socket.IO on http://localhost:3001. The Vite dev server proxies `/api` and `/socket.io` to the mock, so no environment variables are needed for local development.
+
+Checks:
+
+```bash
+npm run typecheck
+npm run lint
 npm run build
 ```
 
-The production build will be in the `dist` directory.
-
-## Project Structure
+## Project structure
 
 ```
-Web_Dashboard/
-├── src/
-│   ├── components/          # React components
-│   │   ├── Dashboard/       # Layout components
-│   │   ├── VideoFeeds/      # Video grid and players
-│   │   ├── LidarView/       # LiDAR visualization
-│   │   ├── Controls/        # Control panels
-│   │   ├── Status/          # Status monitoring
-│   │   └── common/          # Shared components
-│   ├── services/            # API and WebSocket services
-│   ├── store/               # Redux store and slices
-│   ├── types/               # TypeScript type definitions
-│   ├── hooks/               # Custom React hooks
-│   ├── theme/               # MUI theme configuration
-│   ├── pages/               # Page components
-│   ├── App.tsx              # Main app component
-│   └── main.tsx             # Entry point
-├── server/                  # Mock backend server
-│   └── index.ts             # Express + Socket.io server
-├── public/                  # Static assets
-└── docs/                    # Documentation
+src/components/   VideoFeeds, LidarView, Controls, Status, common (AlertPanel)
+src/services/     REST client (api.ts) and Socket.IO wrapper (websocket.ts)
+src/store/        Redux slices: system, camera, recording, lidar, alert
+src/types/        Shared TypeScript types
+src/theme/        MUI dark theme
+server/index.ts   Mock Express + Socket.IO backend
+docs/             API reference, architecture notes, deployment notes
 ```
 
-## Usage Guide
+## API
 
-### Viewing Video Feeds
-1. The dashboard opens with the video feed view
-2. Use the grid layout selector to switch between 1, 4, 9, or 16 camera views
-3. Click the fullscreen icon on any camera to expand it
-4. Camera status indicators show connection state and FPS
-
-### Controlling Cameras
-1. Select a camera from the control panel
-2. Adjust exposure, gain, and white balance using sliders or direct input
-3. Click "Apply Settings" to send changes to the camera
-4. Use "Reset to Defaults" to restore factory settings
-
-### Recording Sessions
-1. Configure recording settings (quality, codec)
-2. Click "Start Recording" to begin capture
-3. Monitor recording progress and storage usage
-4. Click "Stop Recording" to end the session
-
-### Monitoring System Status
-- View real-time system health metrics (CPU, memory, disk)
-- Monitor network performance (bandwidth, latency, packet loss)
-- Check component status (cameras, LiDAR)
-- Review active alerts and notifications
-
-## API Integration
-
-### REST Endpoints
+REST endpoints served by the mock:
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/systems` | List all systems |
-| GET | `/api/systems/:id` | Get system details |
-| GET | `/api/systems/:id/cameras` | List cameras for system |
+|---|---|---|
+| GET | `/api/systems` | List systems |
+| GET | `/api/systems/:id` | System details |
+| GET | `/api/systems/:id/cameras` | Cameras of a system |
 | PUT | `/api/cameras/:id/settings` | Update camera settings |
-| POST | `/api/recording/start` | Start recording |
-| POST | `/api/recording/stop` | Stop recording |
-| GET | `/api/recording/sessions` | List recording sessions |
-| GET | `/api/status` | Get system status |
+| POST | `/api/recording/start` | Start a recording session |
+| POST | `/api/recording/stop` | Stop the recording session |
+| GET | `/api/recording/sessions` | Past sessions |
+| GET | `/api/status?systemId=` | Health and network metrics |
 
-### WebSocket Events
-
-**Client → Server:**
-- `camera:updateSettings` - Update camera settings
-- `recording:start` - Start recording
-- `recording:stop` - Stop recording
-- `lidar:updateView` - Update LiDAR view configuration
-
-**Server → Client:**
-- `system:status` - System status updates
-- `camera:settingsUpdated` - Camera settings confirmation
-- `recording:update` - Recording status updates
-- `lidar:viewUpdated` - LiDAR view confirmation
+Socket.IO events: client sends `camera:updateSettings`, `recording:start`, `recording:stop`, `lidar:updateView`; server sends `system:status`, `camera:settingsUpdated`, `recording:update`, `lidar:viewUpdated`. Details in `docs/API.md`.
 
 ## Configuration
 
-### Environment Variables
+The mock reads `PORT` (default 3001), `CORS_ORIGIN` (comma-separated browser origins; defaults to the Vite dev origins outside production) and `TRUST_PROXY=true` when it sits behind a reverse proxy. The front-end talks to `/api` and `/socket.io` on its own origin, so put it behind the same proxy as the backend in any real deployment.
 
-Create a `.env` file in the root directory:
+## Security notes
 
-```env
-VITE_API_URL=http://localhost:3001
-VITE_WS_URL=http://localhost:3001
-```
-
-### Customization
-
-- **Theme**: Edit `src/theme/theme.ts` to customize colors and styling
-- **Grid Layouts**: Modify `src/components/VideoFeeds/VideoGrid.tsx`
-- **API Endpoints**: Update `src/services/api.ts`
-
-## Development
-
-### Code Style
-- ESLint is configured for TypeScript and React
-- Run `npm run lint` to check for issues
-
-### Adding New Features
-
-1. **New Component**: Create in `src/components/[category]/`
-2. **New API Endpoint**: Add to `src/services/api.ts`
-3. **New State Slice**: Create in `src/store/`
-4. **New Type**: Add to `src/types/index.ts`
-
-### Testing
-
-Unit tests and integration tests are recommended for:
-- Utility functions
-- Redux reducers
-- API service methods
-- Critical user flows
-
-## Deployment
-
-### Docker (Recommended)
-
-```dockerfile
-# Dockerfile example
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "run", "preview"]
-```
-
-### Cloud Platforms
-
-The application is designed to be deployed on:
-- **Azure**: Use Azure App Service or Azure Static Web Apps
-- **AWS**: Deploy to S3 + CloudFront or Elastic Beanstalk
-- **Vercel/Netlify**: Zero-config deployment for frontend
-
-## Troubleshooting
-
-### Common Issues
-
-**Video feeds not loading:**
-- Check that the backend server is running on port 3001
-- Verify WebSocket connection in browser console
-- Ensure CORS is properly configured
-
-**Controls not responding:**
-- Check browser console for errors
-- Verify Redux DevTools for state updates
-- Ensure WebSocket is connected
-
-**Build errors:**
-- Clear `node_modules` and reinstall: `rm -rf node_modules && npm install`
-- Check Node.js version: `node --version` (should be 18+)
-
-## Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with proper TypeScript types
-4. Test thoroughly
-5. Submit a pull request
+The mock validates and bounds every input it accepts, rate-limits `/api` per client address and restricts browser origins. It does not authenticate anyone. Treat it as a development tool. See `docs/SECURITY.md`.
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Support
-
-For issues, questions, or feature requests:
-- Open an issue on GitHub
-- Check the documentation in `/docs`
-- Review the API documentation in `docs/API.md`
-
-## Roadmap
-
-### Phase 1: MVP (Current)
-- ✅ Basic video feed display
-- ✅ Camera controls
-- ✅ System status monitoring
-- ✅ Recording controls
-- ⏳ LiDAR visualization (Three.js integration)
-
-### Phase 2: Enhanced Features
-- Historical metrics and graphing
-- Advanced alert system
-- Preset management
-- User authentication
-- Role-based access control
-
-### Phase 3: Production Ready
-- Comprehensive testing
-- Performance optimization
-- Azure integration
-- Monitoring and logging
-- Deployment automation
-
-## Acknowledgments
-
-Built with:
-- [React](https://reactjs.org/)
-- [Material-UI](https://mui.com/)
-- [Redux Toolkit](https://redux-toolkit.js.org/)
-- [Socket.io](https://socket.io/)
-- [Three.js](https://threejs.org/)
-- [Vite](https://vitejs.dev/)
-
----
-
-**Version**: 1.0.0  
-**Last Updated**: 2024  
-**Status**: Active Development
-
+MIT, see `LICENSE`.

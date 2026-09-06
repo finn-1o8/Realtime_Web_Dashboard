@@ -395,16 +395,7 @@ Alerts appear at the bottom of the screen:
 - **GitHub Issues**: Report bugs or request features
 - **Logs**: Check browser console and server logs for errors
 
-### Contact Information
+### Contact
 
-For technical support or questions:
-- Email: support@yourdomain.com
-- Documentation: https://docs.yourdomain.com
-- GitHub: https://github.com/yourorg/dashboard
-
----
-
-**Version**: 1.0.0  
-**Last Updated**: 2024  
-**Status**: Active
+Questions and bug reports: open an issue at https://github.com/finn-1o8/Realtime_Web_Dashboard/issues.
 

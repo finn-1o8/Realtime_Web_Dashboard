@@ -363,9 +363,7 @@ socket.on('alert:error', (alert) => {
 
 ## Rate Limiting
 
-Currently, no rate limiting is implemented. In production, consider:
-- 100 requests per minute per IP
-- 10 WebSocket messages per second per connection
+The mock server limits `/api` to 600 requests per 15 minutes per client address and answers `429` with a `retryAfter` value in seconds when the limit is exceeded. Socket.IO events are not rate-limited.
 
 ## Data Models
 

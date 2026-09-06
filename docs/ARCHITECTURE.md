@@ -269,7 +269,7 @@ Client receives and updates UI
 | Redux Toolkit | State Management | Zustand, MobX |
 | Material-UI | Component Library | Ant Design, Chakra UI |
 | Socket.io-client | Real-time | Native WebSocket |
-| Three.js | 3D Graphics | Babylon.js, D3.js |
+| Canvas 2D | Point-cloud rendering | Three.js (worth adopting for real LiDAR frames) |
 | Vite | Build Tool | Webpack, Parcel |
 
 ### Backend Stack
