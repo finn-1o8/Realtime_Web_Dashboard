@@ -6,9 +6,11 @@ import {
   Chip,
   Collapse,
   Stack,
+  Tooltip,
 } from '@mui/material';
 import {
   Close as CloseIcon,
+  Done as AcknowledgeIcon,
   Error as ErrorIcon,
   Warning as WarningIcon,
   Info as InfoIcon,
@@ -114,13 +116,24 @@ function AlertPanel() {
                   </Stack>
                   <Typography variant="body2">{alert.message}</Typography>
                 </Box>
-                <IconButton
-                  size="small"
-                  onClick={() => handleDismiss(alert.id)}
-                  sx={{ alignSelf: 'flex-start' }}
-                >
-                  <CloseIcon fontSize="small" />
-                </IconButton>
+                <Tooltip title="Acknowledge">
+                  <IconButton
+                    size="small"
+                    onClick={() => handleAcknowledge(alert.id)}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    <AcknowledgeIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Dismiss">
+                  <IconButton
+                    size="small"
+                    onClick={() => handleDismiss(alert.id)}
+                    sx={{ alignSelf: 'flex-start' }}
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
               </Stack>
             </Paper>
           ))}

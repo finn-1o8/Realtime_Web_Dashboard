@@ -1,76 +1,53 @@
 import { io, Socket } from 'socket.io-client';
-import type { WebSocketEvent } from '../types';
+import type { CameraSettings, RecordingConfig } from '../types';
 
-type EventCallback = (data: any) => void;
+type EventCallback = (data: unknown) => void;
+
+export interface LidarViewConfig {
+  rotationX?: number;
+  rotationY?: number;
+  zoom?: number;
+  showDepth?: boolean;
+}
 
 class WebSocketService {
   private socket: Socket | null = null;
   private eventHandlers: Map<string, EventCallback[]> = new Map();
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
 
   connect(url: string = '/socket.io'): void {
-    if (this.socket?.connected) {
-      console.log('WebSocket already connected');
-      return;
-    }
-
-    console.log('Attempting to connect to WebSocket at:', url);
+    if (this.socket?.connected) return;
 
     this.socket = io(url, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      reconnectionAttempts: this.maxReconnectAttempts,
+      reconnectionAttempts: 5,
       timeout: 10000,
       autoConnect: true,
     });
 
-    this.socket.on('connect', () => {
-      console.log('✅ WebSocket connected successfully');
-      this.reconnectAttempts = 0;
-      this.emit('connected', {});
-    });
-
-    this.socket.on('disconnect', (reason) => {
-      console.log('⚠️ WebSocket disconnected:', reason);
-      this.emit('disconnected', { reason });
-    });
-
+    this.socket.on('connect', () => this.dispatchLocal('connected', {}));
+    this.socket.on('disconnect', (reason) => this.dispatchLocal('disconnected', { reason }));
     this.socket.on('connect_error', (error) => {
-      console.error('❌ WebSocket connection error:', error.message);
-      this.reconnectAttempts++;
-      this.emit('error', { error: error.message });
+      console.warn('WebSocket connection error:', error.message);
+      this.dispatchLocal('error', { error: error.message });
     });
 
-    // Register all existing event handlers
     this.eventHandlers.forEach((handlers, event) => {
-      handlers.forEach((handler) => {
-        this.socket?.on(event, handler);
-      });
+      handlers.forEach((handler) => this.socket?.on(event, handler));
     });
   }
 
   disconnect(): void {
-    if (this.socket) {
-      this.socket.disconnect();
-      this.socket = null;
-    }
+    this.socket?.disconnect();
+    this.socket = null;
   }
 
   on(event: string, callback: EventCallback): () => void {
-    if (!this.eventHandlers.has(event)) {
-      this.eventHandlers.set(event, []);
-    }
+    if (!this.eventHandlers.has(event)) this.eventHandlers.set(event, []);
     this.eventHandlers.get(event)!.push(callback);
-
-    // Register with socket if connected
-    if (this.socket) {
-      this.socket.on(event, callback);
-    }
-
-    // Return unsubscribe function
+    this.socket?.on(event, callback);
     return () => this.off(event, callback);
   }
 
@@ -78,17 +55,13 @@ class WebSocketService {
     const handlers = this.eventHandlers.get(event);
     if (handlers) {
       const index = handlers.indexOf(callback);
-      if (index > -1) {
-        handlers.splice(index, 1);
-      }
+      if (index > -1) handlers.splice(index, 1);
     }
-
-    if (this.socket) {
-      this.socket.off(event, callback);
-    }
+    this.socket?.off(event, callback);
   }
 
-  emit(event: string, data: any): void {
+  /** Send an event to the server. */
+  emit(event: string, data: unknown): void {
     if (this.socket?.connected) {
       this.socket.emit(event, data);
     } else {
@@ -96,16 +69,20 @@ class WebSocketService {
     }
   }
 
+  /** Notify local subscribers of connection lifecycle events. */
+  private dispatchLocal(event: string, data: unknown): void {
+    this.eventHandlers.get(event)?.forEach((handler) => handler(data));
+  }
+
   isConnected(): boolean {
     return this.socket?.connected ?? false;
   }
 
-  // Specific event emitters for our API
-  updateCameraSettings(cameraId: string, settings: any): void {
+  updateCameraSettings(cameraId: string, settings: Partial<CameraSettings>): void {
     this.emit('camera:updateSettings', { cameraId, settings });
   }
 
-  startRecording(config: any): void {
+  startRecording(config: Partial<RecordingConfig>): void {
     this.emit('recording:start', config);
   }
 
@@ -113,10 +90,9 @@ class WebSocketService {
     this.emit('recording:stop', { sessionId });
   }
 
-  updateLidarView(viewConfig: any): void {
+  updateLidarView(viewConfig: LidarViewConfig): void {
     this.emit('lidar:updateView', viewConfig);
   }
 }
 
 export const websocketService = new WebSocketService();
-

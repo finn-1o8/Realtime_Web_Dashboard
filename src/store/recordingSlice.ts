@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import type { RecordingSession, RecordingConfig } from '../types';
+import type { RecordingSession } from '../types';
 
 interface RecordingState {
   currentSession: RecordingSession | null;

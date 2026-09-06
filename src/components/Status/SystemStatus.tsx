@@ -151,9 +151,10 @@ function SystemStatus() {
       {/* Network Status */}
       {status && status.network && (
         <Box sx={{ mb: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>
-            Network
-          </Typography>
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mb: 1 }}>
+            <NetworkIcon fontSize="small" />
+            <Typography variant="subtitle2">Network</Typography>
+          </Stack>
           <Stack spacing={1}>
             <Stack direction="row" justifyContent="space-between">
               <Typography variant="body2">Bandwidth</Typography>

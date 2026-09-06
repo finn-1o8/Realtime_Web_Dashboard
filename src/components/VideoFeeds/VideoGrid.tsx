@@ -1,4 +1,4 @@
-import { Box, Paper, Typography, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, IconButton, Tooltip } from '@mui/material';
 import { Fullscreen as FullscreenIcon } from '@mui/icons-material';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import VideoPlayer from './VideoPlayer';

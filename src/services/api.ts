@@ -1,6 +1,10 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
-import type { System, Camera, RecordingSession, RecordingConfig, ApiResponse } from '../types';
+import axios, { AxiosInstance } from 'axios';
+import type { System, Camera, RecordingSession, RecordingConfig, SystemStatus, ApiResponse } from '../types';
 
+/**
+ * REST client for the dashboard API. Requests go to /api on the page's own origin; in
+ * development the Vite dev server proxies that path to the mock server.
+ */
 class ApiService {
   private api: AxiosInstance;
 
@@ -8,94 +12,51 @@ class ApiService {
     this.api = axios.create({
       baseURL: '/api',
       timeout: 10000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
-
-    // Add request interceptor for auth tokens
-    this.api.interceptors.request.use(
-      (config) => {
-        const token = localStorage.getItem('authToken');
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-      },
-      (error) => Promise.reject(error)
-    );
-
-    // Add response interceptor for error handling
-    this.api.interceptors.response.use(
-      (response) => response,
-      (error: AxiosError) => {
-        if (error.response?.status === 401) {
-          // Handle unauthorized
-          localStorage.removeItem('authToken');
-          window.location.href = '/login';
-        }
-        return Promise.reject(error);
-      }
-    );
   }
 
-  // System endpoints
+  private unwrap<T>(response: { data: ApiResponse<T> }, what: string): T {
+    if (!response.data.success || response.data.data === undefined) {
+      throw new Error(response.data.error || `${what} not available`);
+    }
+    return response.data.data;
+  }
+
   async getSystems(): Promise<System[]> {
-    const response = await this.api.get<ApiResponse<System[]>>('/systems');
-    return response.data.data || [];
+    return this.unwrap(await this.api.get<ApiResponse<System[]>>('/systems'), 'Systems');
   }
 
   async getSystem(id: string): Promise<System> {
-    const response = await this.api.get<ApiResponse<System>>(`/systems/${id}`);
-    if (!response.data.data) throw new Error('System not found');
-    return response.data.data;
+    return this.unwrap(await this.api.get<ApiResponse<System>>(`/systems/${id}`), 'System');
   }
 
-  // Camera endpoints
   async getCameras(systemId: string): Promise<Camera[]> {
-    const response = await this.api.get<ApiResponse<Camera[]>>(
-      `/systems/${systemId}/cameras`
-    );
-    return response.data.data || [];
+    return this.unwrap(await this.api.get<ApiResponse<Camera[]>>(`/systems/${systemId}/cameras`), 'Cameras');
   }
 
-  async updateCameraSettings(
-    cameraId: string,
-    settings: Partial<Camera['settings']>
-  ): Promise<void> {
+  async updateCameraSettings(cameraId: string, settings: Partial<Camera['settings']>): Promise<void> {
     await this.api.put(`/cameras/${cameraId}/settings`, settings);
   }
 
-  // Recording endpoints
-  async startRecording(config: RecordingConfig): Promise<RecordingSession> {
-    const response = await this.api.post<ApiResponse<RecordingSession>>(
-      '/recording/start',
-      config
-    );
-    if (!response.data.data) throw new Error('Failed to start recording');
-    return response.data.data;
+  async startRecording(config: Partial<RecordingConfig>): Promise<RecordingSession> {
+    return this.unwrap(await this.api.post<ApiResponse<RecordingSession>>('/recording/start', config), 'Recording');
   }
 
-  async stopRecording(sessionId: string): Promise<void> {
-    await this.api.post(`/recording/stop`, { sessionId });
+  async stopRecording(): Promise<void> {
+    await this.api.post('/recording/stop');
   }
 
   async getSessions(systemId: string): Promise<RecordingSession[]> {
-    const response = await this.api.get<ApiResponse<RecordingSession[]>>(
-      '/recording/sessions',
-      { params: { systemId } }
+    return this.unwrap(
+      await this.api.get<ApiResponse<RecordingSession[]>>('/recording/sessions', { params: { systemId } }),
+      'Sessions'
     );
-    return response.data.data || [];
   }
 
-  // Status endpoint
-  async getSystemStatus(systemId: string) {
-    const response = await this.api.get(`/status`, {
-      params: { systemId },
-    });
-    return response.data;
+  async getSystemStatus(systemId: string): Promise<SystemStatus> {
+    return this.unwrap(await this.api.get<ApiResponse<SystemStatus>>('/status', { params: { systemId } }), 'Status');
   }
 }
 
 export const apiService = new ApiService();
-

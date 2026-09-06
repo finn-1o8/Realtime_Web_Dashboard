@@ -1,351 +1,217 @@
+/**
+ * Mock backend for the dashboard.
+ *
+ * Serves fabricated systems, cameras and status metrics over REST and Socket.IO so the
+ * front-end can be developed and demonstrated without hardware. There is no
+ * authentication: do not expose this process to the internet as is.
+ */
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 
+type CameraSettings = { exposure: number; gain: number; whiteBalance: number; focus: number; zoom: number };
+type RecordingConfig = {
+  videoQuality: 'low' | 'medium' | 'high';
+  codec: string;
+  lidarPointDensity: number;
+  outputPath: string;
+  naming: string;
+};
+type RecordingSession = {
+  id: string;
+  systemId: string;
+  startTime: number;
+  endTime?: number;
+  duration: number;
+  status: 'recording' | 'stopped' | 'paused';
+  config: RecordingConfig;
+};
+
 const app = express();
 const httpServer = createServer(app);
 
-// Security: Configure CORS with allowed origins
+// When the mock runs behind a reverse proxy, set TRUST_PROXY=true so req.ip is the client address.
+app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? 1 : false);
+
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
   : process.env.NODE_ENV === 'production'
-  ? []
-  : ['http://localhost:3000', 'http://localhost:5173'];
+    ? []
+    : ['http://localhost:3000', 'http://localhost:5173'];
+
+const originCheck = (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+  // Requests without an Origin header come from non-browser clients (curl, tests); allow them in development.
+  if (!origin && process.env.NODE_ENV !== 'production') return callback(null, true);
+  if (origin && allowedOrigins.includes(origin)) return callback(null, true);
+  callback(new Error('Not allowed by CORS'));
+};
 
 const io = new Server(httpServer, {
-  cors: {
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests) only in development
-      if (!origin && process.env.NODE_ENV !== 'production') {
-        return callback(null, true);
-      }
-      if (origin && allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    methods: ['GET', 'POST'],
-    credentials: true,
-  },
-  allowEIO3: true,
+  cors: { origin: originCheck, methods: ['GET', 'POST'] },
 });
 
-// Security: Configure CORS middleware
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests) only in development
-      if (!origin && process.env.NODE_ENV !== 'production') {
-        return callback(null, true);
-      }
-      if (origin && allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    optionsSuccessStatus: 200,
-  })
-);
-
-// Security: Add security headers
-app.use((req, res, next) => {
-  // Prevent clickjacking
-  res.setHeader('X-Frame-Options', 'DENY');
-  // Prevent MIME type sniffing
+app.use(cors({ origin: originCheck, optionsSuccessStatus: 200 }));
+app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  // Enable XSS protection
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  // Referrer Policy
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Content Security Policy
-  res.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:;"
-  );
-  // Strict Transport Security (only in production with HTTPS)
-  if (process.env.NODE_ENV === 'production') {
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  }
   next();
 });
+app.use(express.json({ limit: '1mb' }));
 
-// Security: Limit request body size
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Security: Simple rate limiting middleware
+// Simple fixed-window rate limit per client address. Entries are evicted once their window expires.
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 600;
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 minutes
-const RATE_LIMIT_MAX_REQUESTS = 100; // Max requests per window
 
-const rateLimitMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimitMap) {
+    if (now > entry.resetTime) rateLimitMap.delete(key);
+  }
+}, RATE_LIMIT_WINDOW_MS).unref();
+
+app.use('/api', (req, res, next) => {
   const clientId = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
-  const clientData = rateLimitMap.get(clientId);
-
-  if (!clientData || now > clientData.resetTime) {
-    rateLimitMap.set(clientId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+  const entry = rateLimitMap.get(clientId);
+  if (!entry || now > entry.resetTime) {
+    rateLimitMap.set(clientId, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
     return next();
   }
-
-  if (clientData.count >= RATE_LIMIT_MAX_REQUESTS) {
+  if (entry.count >= RATE_LIMIT_MAX_REQUESTS) {
     return res.status(429).json({
       success: false,
       error: 'Too many requests, please try again later',
-      retryAfter: Math.ceil((clientData.resetTime - now) / 1000),
+      retryAfter: Math.ceil((entry.resetTime - now) / 1000),
     });
   }
-
-  clientData.count++;
+  entry.count++;
   next();
-};
+});
 
-// Apply rate limiting to API routes
-app.use('/api', rateLimitMiddleware);
-
+// ---------------------------------------------------------------------------
 // Mock data
+// ---------------------------------------------------------------------------
+
 const mockSystems = [
-  {
-    id: 'system_1',
-    name: 'Primary Monitoring System',
-    status: 'online' as const,
-    lastHeartbeat: Date.now(),
-    location: 'Building A - Floor 3',
-  },
-  {
-    id: 'system_2',
-    name: 'Secondary Monitoring System',
-    status: 'online' as const,
-    lastHeartbeat: Date.now() - 5000,
-    location: 'Building B - Floor 1',
-  },
+  { id: 'system_1', name: 'Primary Monitoring System', status: 'online' as const, lastHeartbeat: Date.now(), location: 'Building A - Floor 3' },
+  { id: 'system_2', name: 'Secondary Monitoring System', status: 'online' as const, lastHeartbeat: Date.now() - 5000, location: 'Building B - Floor 1' },
 ];
 
-const mockCameras = [
-  {
-    id: 'camera_1',
-    name: 'Front Camera',
-    systemId: 'system_1',
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    status: 'connected' as const,
-    settings: {
-      exposure: 50,
-      gain: 50,
-      whiteBalance: 50,
-      focus: 50,
-      zoom: 1,
-    },
-    metrics: {
-      fps: 30,
-      resolution: '1920x1080',
-      temperature: 45,
-      errors: [],
-    },
-    lastUpdate: Date.now(),
-  },
-  {
-    id: 'camera_2',
-    name: 'Rear Camera',
-    systemId: 'system_1',
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    status: 'connected' as const,
-    settings: {
-      exposure: 55,
-      gain: 45,
-      whiteBalance: 50,
-      focus: 50,
-      zoom: 1,
-    },
-    metrics: {
-      fps: 30,
-      resolution: '1920x1080',
-      temperature: 43,
-      errors: [],
-    },
-    lastUpdate: Date.now(),
-  },
-  {
-    id: 'camera_3',
-    name: 'Side Camera',
-    systemId: 'system_1',
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    status: 'connected' as const,
-    settings: {
-      exposure: 50,
-      gain: 50,
-      whiteBalance: 50,
-      focus: 50,
-      zoom: 1,
-    },
-    metrics: {
-      fps: 30,
-      resolution: '1920x1080',
-      temperature: 47,
-      errors: [],
-    },
-    lastUpdate: Date.now(),
-  },
-  {
-    id: 'camera_4',
-    name: 'Top Camera',
-    systemId: 'system_1',
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-    status: 'connected' as const,
-    settings: {
-      exposure: 50,
-      gain: 50,
-      whiteBalance: 50,
-      focus: 50,
-      zoom: 1,
-    },
-    metrics: {
-      fps: 30,
-      resolution: '1920x1080',
-      temperature: 44,
-      errors: [],
-    },
-    lastUpdate: Date.now(),
-  },
+const sampleVideos = [
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
 ];
 
-let recordingSession: any = null;
+const mockCameras = ['Front Camera', 'Rear Camera', 'Side Camera', 'Top Camera'].map((name, i) => ({
+  id: `camera_${i + 1}`,
+  name,
+  systemId: 'system_1',
+  url: sampleVideos[i],
+  status: 'connected' as const,
+  settings: { exposure: 50, gain: 50, whiteBalance: 50, focus: 50, zoom: 1 } as CameraSettings,
+  metrics: { fps: 30, resolution: '1920x1080', temperature: 43 + i, errors: [] as string[] },
+  lastUpdate: Date.now(),
+}));
 
-// Security: Input validation helpers
-const validateId = (id: string): boolean => {
-  // Allow alphanumeric, underscore, and hyphen, max 100 chars
-  return /^[a-zA-Z0-9_-]{1,100}$/.test(id);
+let recordingSession: RecordingSession | null = null;
+
+// ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+const SETTING_KEYS: Array<keyof CameraSettings> = ['exposure', 'gain', 'whiteBalance', 'focus', 'zoom'];
+const QUALITIES = ['low', 'medium', 'high'] as const;
+
+const isValidId = (id: unknown): id is string => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
+
+const isCameraSettings = (value: unknown): value is Partial<CameraSettings> => {
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).every(
+    ([key, v]) => (SETTING_KEYS as string[]).includes(key) && typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1000
+  );
 };
 
-const validateCameraSettings = (settings: any): boolean => {
-  if (!settings || typeof settings !== 'object') return false;
-  const validKeys = ['exposure', 'gain', 'whiteBalance', 'focus', 'zoom'];
-  for (const key in settings) {
-    if (!validKeys.includes(key)) return false;
-    const value = settings[key];
-    if (typeof value !== 'number' || isNaN(value) || value < 0 || value > 1000) {
-      return false;
-    }
-  }
+const isRecordingConfig = (value: unknown): value is Partial<RecordingConfig> => {
+  if (!value || typeof value !== 'object') return false;
+  const cfg = value as Record<string, unknown>;
+  if (cfg.videoQuality !== undefined && !(QUALITIES as readonly string[]).includes(String(cfg.videoQuality))) return false;
+  if (cfg.codec !== undefined && typeof cfg.codec !== 'string') return false;
+  if (cfg.lidarPointDensity !== undefined && (typeof cfg.lidarPointDensity !== 'number' || cfg.lidarPointDensity < 0)) return false;
   return true;
 };
 
-const validateRecordingConfig = (config: any): boolean => {
-  if (!config || typeof config !== 'object') return false;
-  const validQualities = ['low', 'medium', 'high'];
-  if (config.videoQuality && !validQualities.includes(config.videoQuality)) {
-    return false;
+const cleanString = (value: unknown, fallback = ''): string =>
+  typeof value === 'string' ? value.trim().slice(0, 200) : fallback;
+
+const applySettings = (camera: (typeof mockCameras)[number], settings: Partial<CameraSettings>) => {
+  for (const key of SETTING_KEYS) {
+    const v = settings[key];
+    if (v !== undefined) camera.settings[key] = Math.max(0, Math.min(1000, v));
   }
-  if (config.codec && typeof config.codec !== 'string') {
-    return false;
-  }
-  if (config.lidarPointDensity && (typeof config.lidarPointDensity !== 'number' || config.lidarPointDensity < 0)) {
-    return false;
-  }
-  return true;
+  camera.lastUpdate = Date.now();
 };
 
-// Security: Sanitize string input
-const sanitizeString = (input: string): string => {
-  if (typeof input !== 'string') return '';
-  return input.trim().replace(/[<>]/g, '');
-};
+const startSession = (config: Partial<RecordingConfig>): RecordingSession => ({
+  id: `session_${Date.now()}`,
+  systemId: 'system_1',
+  startTime: Date.now(),
+  duration: 0,
+  status: 'recording',
+  config: {
+    videoQuality: config.videoQuality ?? 'high',
+    codec: cleanString(config.codec, 'h264'),
+    lidarPointDensity: Math.max(0, Number(config.lidarPointDensity) || 0),
+    outputPath: cleanString(config.outputPath),
+    naming: cleanString(config.naming),
+  },
+});
 
-// REST API Routes
-app.get('/api/systems', (req, res) => {
+// ---------------------------------------------------------------------------
+// REST API
+// ---------------------------------------------------------------------------
+
+app.get('/api/systems', (_req, res) => {
   res.json({ success: true, data: mockSystems });
 });
 
 app.get('/api/systems/:id', (req, res) => {
-  const id = req.params.id;
-  if (!validateId(id)) {
-    return res.status(400).json({ success: false, error: 'Invalid system ID format' });
-  }
-  const system = mockSystems.find((s) => s.id === id);
-  if (system) {
-    res.json({ success: true, data: system });
-  } else {
-    res.status(404).json({ success: false, error: 'System not found' });
-  }
+  if (!isValidId(req.params.id)) return res.status(400).json({ success: false, error: 'Invalid system ID format' });
+  const system = mockSystems.find((s) => s.id === req.params.id);
+  if (!system) return res.status(404).json({ success: false, error: 'System not found' });
+  res.json({ success: true, data: system });
 });
 
 app.get('/api/systems/:id/cameras', (req, res) => {
-  const id = req.params.id;
-  if (!validateId(id)) {
-    return res.status(400).json({ success: false, error: 'Invalid system ID format' });
-  }
-  const cameras = mockCameras.filter((c) => c.systemId === id);
-  res.json({ success: true, data: cameras });
+  if (!isValidId(req.params.id)) return res.status(400).json({ success: false, error: 'Invalid system ID format' });
+  res.json({ success: true, data: mockCameras.filter((c) => c.systemId === req.params.id) });
 });
 
 app.put('/api/cameras/:id/settings', (req, res) => {
-  const id = req.params.id;
-  if (!validateId(id)) {
-    return res.status(400).json({ success: false, error: 'Invalid camera ID format' });
-  }
-  if (!validateCameraSettings(req.body)) {
-    return res.status(400).json({ success: false, error: 'Invalid camera settings format' });
-  }
-  const camera = mockCameras.find((c) => c.id === id);
-  if (camera) {
-    // Only update allowed settings
-    const allowedSettings = ['exposure', 'gain', 'whiteBalance', 'focus', 'zoom'];
-    allowedSettings.forEach((key) => {
-      if (req.body[key] !== undefined) {
-        camera.settings[key as keyof typeof camera.settings] = Math.max(0, Math.min(1000, Number(req.body[key])));
-      }
-    });
-    camera.lastUpdate = Date.now();
-    res.json({ success: true });
-  } else {
-    res.status(404).json({ success: false, error: 'Camera not found' });
-  }
+  if (!isValidId(req.params.id)) return res.status(400).json({ success: false, error: 'Invalid camera ID format' });
+  if (!isCameraSettings(req.body)) return res.status(400).json({ success: false, error: 'Invalid camera settings format' });
+  const camera = mockCameras.find((c) => c.id === req.params.id);
+  if (!camera) return res.status(404).json({ success: false, error: 'Camera not found' });
+  applySettings(camera, req.body);
+  res.json({ success: true });
 });
 
 app.post('/api/recording/start', (req, res) => {
-  if (recordingSession) {
-    res.status(400).json({ success: false, error: 'Recording already in progress' });
-    return;
-  }
-
-  if (!validateRecordingConfig(req.body)) {
-    return res.status(400).json({ success: false, error: 'Invalid recording configuration' });
-  }
-
-  recordingSession = {
-    id: `session_${Date.now()}`,
-    systemId: 'system_1',
-    startTime: Date.now(),
-    duration: 0,
-    status: 'recording',
-    config: {
-      videoQuality: req.body.videoQuality || 'high',
-      codec: sanitizeString(req.body.codec || 'h264'),
-      lidarPointDensity: Math.max(0, Number(req.body.lidarPointDensity) || 0),
-      outputPath: sanitizeString(req.body.outputPath || ''),
-      naming: sanitizeString(req.body.naming || ''),
-    },
-  };
-
+  if (recordingSession) return res.status(400).json({ success: false, error: 'Recording already in progress' });
+  if (!isRecordingConfig(req.body)) return res.status(400).json({ success: false, error: 'Invalid recording configuration' });
+  recordingSession = startSession(req.body);
   res.json({ success: true, data: recordingSession });
 });
 
-app.post('/api/recording/stop', (req, res) => {
-  if (recordingSession) {
-    recordingSession.status = 'stopped';
-    recordingSession.endTime = Date.now();
-    recordingSession = null;
-    res.json({ success: true });
-  } else {
-    res.status(400).json({ success: false, error: 'No active recording' });
-  }
+app.post('/api/recording/stop', (_req, res) => {
+  if (!recordingSession) return res.status(400).json({ success: false, error: 'No active recording' });
+  recordingSession = null;
+  res.json({ success: true });
 });
 
-app.get('/api/recording/sessions', (req, res) => {
-  // Mock sessions
+app.get('/api/recording/sessions', (_req, res) => {
   res.json({
     success: true,
     data: [
@@ -363,18 +229,12 @@ app.get('/api/recording/sessions', (req, res) => {
 });
 
 app.get('/api/status', (req, res) => {
-  const systemId = req.query.systemId as string;
-  const validatedSystemId = systemId && validateId(systemId) ? systemId : 'system_1';
-  
+  const systemId = isValidId(req.query.systemId) ? req.query.systemId : 'system_1';
   res.json({
     success: true,
     data: {
-      systemId: validatedSystemId,
-      network: {
-        bandwidthUsage: Math.random() * 100,
-        latency: Math.random() * 50,
-        packetLoss: Math.random() * 5,
-      },
+      systemId,
+      network: { bandwidthUsage: Math.random() * 100, latency: Math.random() * 50, packetLoss: Math.random() * 5 },
       health: {
         cpuUsage: Math.random() * 100,
         memoryUsage: Math.random() * 100,
@@ -387,149 +247,67 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Security: WebSocket authentication middleware
-// Note: Authentication implementation is required for production use
-// In production, verify JWT token from handshake auth before allowing connections
-const authenticateSocket = (socket: any, next: any) => {
-  // Authentication is currently disabled for development/demo purposes
-  // For production deployment, implement JWT token verification:
-  // const token = socket.handshake.auth?.token;
-  // if (!token || !verifyToken(token)) {
-  //   return next(new Error('Authentication error'));
-  // }
-  next();
-};
-
-// WebSocket Events
-io.use(authenticateSocket);
+// ---------------------------------------------------------------------------
+// Socket.IO events
+// ---------------------------------------------------------------------------
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('camera:updateSettings', (data) => {
-    // Security: Validate input
-    if (!data || typeof data !== 'object') {
-      socket.emit('error', { message: 'Invalid data format' });
-      return;
-    }
-    if (!data.cameraId || !validateId(data.cameraId)) {
-      socket.emit('error', { message: 'Invalid camera ID' });
-      return;
-    }
-    if (!validateCameraSettings(data.settings)) {
-      socket.emit('error', { message: 'Invalid camera settings' });
-      return;
-    }
-
-    console.log('Camera settings update:', data);
-    const camera = mockCameras.find((c) => c.id === data.cameraId);
-    if (camera) {
-      // Only update allowed settings
-      const allowedSettings = ['exposure', 'gain', 'whiteBalance', 'focus', 'zoom'];
-      allowedSettings.forEach((key) => {
-        if (data.settings[key] !== undefined) {
-          camera.settings[key as keyof typeof camera.settings] = Math.max(0, Math.min(1000, Number(data.settings[key])));
-        }
-      });
-      camera.lastUpdate = Date.now();
-      socket.emit('camera:settingsUpdated', { cameraId: data.cameraId, settings: camera.settings });
-    } else {
-      socket.emit('error', { message: 'Camera not found' });
-    }
+  socket.on('camera:updateSettings', (data: unknown) => {
+    const payload = (data ?? {}) as { cameraId?: unknown; settings?: unknown };
+    if (!isValidId(payload.cameraId)) return socket.emit('error', { message: 'Invalid camera ID' });
+    if (!isCameraSettings(payload.settings)) return socket.emit('error', { message: 'Invalid camera settings' });
+    const camera = mockCameras.find((c) => c.id === payload.cameraId);
+    if (!camera) return socket.emit('error', { message: 'Camera not found' });
+    applySettings(camera, payload.settings);
+    socket.emit('camera:settingsUpdated', { cameraId: camera.id, settings: camera.settings });
   });
 
-  socket.on('recording:start', (data) => {
-    // Security: Validate input
-    if (!validateRecordingConfig(data)) {
-      socket.emit('error', { message: 'Invalid recording configuration' });
-      return;
-    }
-
-    console.log('Recording start:', data);
-    if (!recordingSession) {
-      recordingSession = {
-        id: `session_${Date.now()}`,
-        systemId: 'system_1',
-        startTime: Date.now(),
-        duration: 0,
-        status: 'recording',
-        config: {
-          videoQuality: data.videoQuality || 'high',
-          codec: sanitizeString(data.codec || 'h264'),
-          lidarPointDensity: Math.max(0, Number(data.lidarPointDensity) || 0),
-          outputPath: sanitizeString(data.outputPath || ''),
-          naming: sanitizeString(data.naming || ''),
-        },
-      };
-      socket.emit('recording:update', recordingSession);
-    } else {
-      socket.emit('error', { message: 'Recording already in progress' });
-    }
+  socket.on('recording:start', (data: unknown) => {
+    if (!isRecordingConfig(data)) return socket.emit('error', { message: 'Invalid recording configuration' });
+    if (recordingSession) return socket.emit('error', { message: 'Recording already in progress' });
+    recordingSession = startSession(data);
+    socket.emit('recording:update', recordingSession);
   });
 
-  socket.on('recording:stop', (data) => {
-    console.log('Recording stop:', data);
-    if (recordingSession) {
-      recordingSession.status = 'stopped';
-      recordingSession.endTime = Date.now();
-      socket.emit('recording:update', recordingSession);
-      recordingSession = null;
-    } else {
-      socket.emit('error', { message: 'No active recording' });
-    }
+  socket.on('recording:stop', () => {
+    if (!recordingSession) return socket.emit('error', { message: 'No active recording' });
+    recordingSession.status = 'stopped';
+    recordingSession.endTime = Date.now();
+    socket.emit('recording:update', recordingSession);
+    recordingSession = null;
   });
 
-  socket.on('lidar:updateView', (data) => {
-    // Security: Basic validation
-    if (!data || typeof data !== 'object') {
-      socket.emit('error', { message: 'Invalid data format' });
-      return;
-    }
-    console.log('LiDAR view update:', data);
+  socket.on('lidar:updateView', (data: unknown) => {
+    if (!data || typeof data !== 'object') return socket.emit('error', { message: 'Invalid data format' });
     socket.emit('lidar:viewUpdated', data);
   });
 
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });
-
-  socket.on('error', (error) => {
-    console.error('Socket error:', error);
-  });
 });
 
 // Periodic status updates
 setInterval(() => {
-  // Update system heartbeat
-  mockSystems.forEach((system) => {
-    if (system.status === 'online') {
-      system.lastHeartbeat = Date.now();
-    }
-  });
-
-  // Update camera metrics
-  mockCameras.forEach((camera) => {
+  for (const system of mockSystems) {
+    if (system.status === 'online') system.lastHeartbeat = Date.now();
+  }
+  for (const camera of mockCameras) {
     camera.metrics.fps = 28 + Math.random() * 4;
     camera.metrics.temperature = 40 + Math.random() * 10;
     camera.lastUpdate = Date.now();
-  });
+  }
+  io.emit('system:status', { systems: mockSystems, cameras: mockCameras });
 
-  // Emit status updates to all connected clients
-  io.emit('system:status', {
-    systems: mockSystems,
-    cameras: mockCameras,
-  });
-
-  // Update recording session if active
   if (recordingSession) {
     recordingSession.duration = Date.now() - recordingSession.startTime;
     io.emit('recording:update', recordingSession);
   }
 }, 2000);
 
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT) || 3001;
 httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📡 WebSocket server ready for connections`);
+  console.log(`Mock server listening on http://localhost:${PORT}`);
 });
-

@@ -110,7 +110,7 @@ export interface ApiResponse<T> {
 // WebSocket Event Types
 export interface WebSocketEvent {
   type: string;
-  payload: any;
+  payload: unknown;
   timestamp: number;
 }
 

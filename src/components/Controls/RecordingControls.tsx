@@ -7,6 +7,7 @@ import {
   Stack,
   LinearProgress,
   MenuItem,
+  Paper,
   Select,
   FormControl,
   InputLabel,
@@ -15,8 +16,8 @@ import {
   PlayArrow as PlayIcon,
   Stop as StopIcon,
   Pause as PauseIcon,
-  CloudDownload as DownloadIcon,
 } from '@mui/icons-material';
+import type { RecordingConfig } from '../../types';
 import { useAppSelector } from '../../hooks/useAppSelector';
 import { useAppDispatch } from '../../hooks/useAppDispatch';
 import { startRecording, stopRecording, pauseRecording } from '../../store/recordingSlice';
@@ -136,7 +137,7 @@ function RecordingControls() {
           <Select
             value={videoQuality}
             label="Video Quality"
-            onChange={(e) => setVideoQuality(e.target.value as any)}
+            onChange={(e) => setVideoQuality(e.target.value as RecordingConfig['videoQuality'])}
             disabled={isRecording}
           >
             <MenuItem value="low">Low</MenuItem>

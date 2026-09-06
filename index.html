@@ -4,9 +4,8 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <!-- Security: Content Security Policy -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss: http://localhost:3001 https:;" />
+    <!-- MUI/Emotion inject inline styles, hence style-src 'unsafe-inline'. Scripts are module bundles, no eval. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https:; font-src 'self' data:; connect-src 'self' ws: wss: http://localhost:3001;" />
     <title>System Monitoring Dashboard</title>
   </head>
   <body>
@@ -14,4 +13,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
